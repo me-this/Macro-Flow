@@ -11,6 +11,7 @@ Standalone usage:
         --event-name "CPI" --release-time-utc "2026-09-11T12:30:00+00:00"
 """
 import argparse
+import json
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -67,6 +68,25 @@ def wait_until(target_utc):
         if remaining <= 0:
             return
         time.sleep(min(remaining, 0.05))
+
+
+def append_execution_log(event_name, release_time_utc, side, entry_price, exit_price, outcome):
+    """Appends one JSON line per fill/close/no-fill outcome to EXECUTION_LOG_PATH.
+    The dashboard's /api/history endpoint reads this file directly."""
+    record = {
+        "event": event_name,
+        "release_time_utc": release_time_utc.isoformat(),
+        "closed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "side": side,
+        "entry": entry_price,
+        "exit": exit_price,
+        "outcome": outcome,
+    }
+    try:
+        with open(config.EXECUTION_LOG_PATH, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as e:
+        log(event_name, f"Failed to write execution log: {e}")
 
 
 def place_straddle(symbol_info, event_name):
@@ -176,7 +196,7 @@ def manage_breakeven(symbol_info, breakeven_done, event_name):
                 log(event_name, f"Breakeven modify failed for {pos.ticket}: {result.retcode}")
 
 
-def close_all_positions(symbol_info, event_name):
+def close_all_positions(symbol_info, event_name, release_time_utc):
     """Force-close every open position from this straddle, market price, regardless
     of P&L. This is the hard 60-second exit rule - it overrides everything else."""
     positions = get_our_positions()
@@ -189,11 +209,9 @@ def close_all_positions(symbol_info, event_name):
 
     for pos in positions:
         if pos.type == mt5.ORDER_TYPE_BUY:
-            close_type = mt5.ORDER_TYPE_SELL
-            close_price = tick.bid
+            close_type, close_price, side = mt5.ORDER_TYPE_SELL, tick.bid, "buy"
         else:
-            close_type = mt5.ORDER_TYPE_BUY
-            close_price = tick.ask
+            close_type, close_price, side = mt5.ORDER_TYPE_BUY, tick.ask, "sell"
 
         req = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -209,8 +227,10 @@ def close_all_positions(symbol_info, event_name):
         result = mt5.order_send(req)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             log(event_name, f"Closed position {pos.ticket} at {close_price} (hard 60s exit)")
+            append_execution_log(event_name, release_time_utc, side, pos.price_open, close_price, "closed_60s")
         else:
             log(event_name, f"FAILED to close position {pos.ticket}: {result.retcode} {result.comment}")
+            append_execution_log(event_name, release_time_utc, side, pos.price_open, None, f"close_failed_{result.retcode}")
 
 
 def run(terminal_path, event_name, release_time_utc):
@@ -254,18 +274,19 @@ def run(terminal_path, event_name, release_time_utc):
         if get_our_positions():
             manage_breakeven(symbol_info, breakeven_done, event_name)
 
-        # No-fill timeout: nothing filled at all shortly after release -> clean up, done
+        # No-fill timeout: nothing filled at all shortly after release -> clean up, log, done
         if not opposite_cleared and seconds_since_release > config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS:
             log(event_name, f"No fill {config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS}s after release. Deleting all.")
             delete_pending_orders(buy_still_pending, "buy", event_name)
             delete_pending_orders(sell_still_pending, "sell", event_name)
+            append_execution_log(event_name, release_time_utc, "none", None, None, "no_fill")
             break
 
         # HARD EXIT: exactly EXIT_SECONDS_AFTER_RELEASE after release, close everything,
         # no exceptions - fires regardless of breakeven state or P&L
         if not hard_exit_done and seconds_since_release >= config.EXIT_SECONDS_AFTER_RELEASE:
             log(event_name, f"{config.EXIT_SECONDS_AFTER_RELEASE}s after release reached - hard exit.")
-            close_all_positions(symbol_info, event_name)
+            close_all_positions(symbol_info, event_name, release_time_utc)
             hard_exit_done = True
             break
 
