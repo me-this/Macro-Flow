@@ -1,18 +1,22 @@
 """
 main.py - orchestrator. Run this on the GitHub Actions Windows RDP session.
 
-1. Loads the hardcoded macro schedule
-2. Finds events falling within this session's window (default: next 6 hours)
-3. For each event, detects all open MT5 terminals and spawns one
-   straddle_executor.py subprocess PER terminal
-4. Waits for all subprocesses for that event to finish before moving to the next
+Runs two things concurrently for the whole session:
+  1. The dashboard API server (background thread) - always up, regardless
+     of whether a macro event is currently scheduled.
+  2. The scheduler loop (main thread) - finds the next event, logs a
+     countdown starting 30 minutes out, then launches execution on every
+     detected terminal at the right moment. Never exits on its own; if
+     there's nothing upcoming it just idles and rechecks periodically.
 """
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
 import config
+import api_server
 from terminal_detector import find_mt5_terminals
 
 
@@ -53,23 +57,44 @@ def run_event_on_all_terminals(event_name, release_time_utc):
     print(f"[main] All terminals finished handling {event_name}.")
 
 
+def countdown_and_launch(event_name, release_time_utc):
+    """Sleeps toward the event, logging a visible countdown starting
+    COUNTDOWN_LOG_START_SECONDS out, so a timezone bug shows up with
+    30 minutes to fix it instead of 2 seconds."""
+    while True:
+        now = datetime.now(timezone.utc)
+        seconds_until = (release_time_utc - now).total_seconds()
+
+        if seconds_until <= 20:
+            break
+
+        if seconds_until <= config.COUNTDOWN_LOG_START_SECONDS:
+            mins, secs = divmod(int(seconds_until), 60)
+            print(f"[main] Countdown to {event_name}: T-{mins:02d}:{secs:02d} "
+                  f"(release {release_time_utc.isoformat()})")
+            time.sleep(min(config.COUNTDOWN_LOG_INTERVAL_SECONDS, seconds_until - 20))
+        else:
+            wait = seconds_until - config.COUNTDOWN_LOG_START_SECONDS
+            print(f"[main] {event_name} is {wait/60:.1f} more minutes away "
+                  f"before countdown logging starts.")
+            time.sleep(min(wait, 300))  # wake at least every 5 min so it stays visibly alive
+
+    run_event_on_all_terminals(event_name, release_time_utc)
+
+
 def main():
-    events = get_events_in_window(hours_ahead=6)
-    if not events:
-        print("[main] No macro events in the next 6 hours. Nothing to do this session.")
-        return
+    threading.Thread(target=api_server.run_api_server, daemon=True).start()
+    print(f"[main] Dashboard API server running on port {config.DASHBOARD_API_PORT}.")
 
-    print(f"[main] {len(events)} event(s) in this session's window:")
-    for e in events:
-        print(f"    {e['event']} at {e['release_time_utc'].isoformat()}")
+    while True:
+        events = get_events_in_window(hours_ahead=6)
+        if not events:
+            print("[main] No macro events in the next 6 hours. Dashboard stays up; rechecking shortly.")
+            time.sleep(config.SCHEDULER_IDLE_POLL_SECONDS)
+            continue
 
-    for e in events:
-        now_utc = datetime.now(timezone.utc)
-        seconds_until = (e["release_time_utc"] - now_utc).total_seconds()
-        if seconds_until > 30:
-            print(f"[main] Sleeping until ~20s before {e['event']}...")
-            time.sleep(seconds_until - 20)
-        run_event_on_all_terminals(e["event"], e["release_time_utc"])
+        next_event = events[0]
+        countdown_and_launch(next_event["event"], next_event["release_time_utc"])
 
 
 if __name__ == "__main__":
