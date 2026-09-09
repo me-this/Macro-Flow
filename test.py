@@ -35,7 +35,7 @@ INITIAL_SL_POINTS = 150         # initial stop loss distance from entry
 BREAKEVEN_TRIGGER_POINTS = 150  # floating profit needed to trigger breakeven move
 BREAKEVEN_LOCK_POINTS = 100     # profit locked in when breakeven triggers
 
-NO_FILL_TIMEOUT_SECONDS = 5     # delete everything if nothing fills in this window
+NO_FILL_TIMEOUT_SECONDS = 900    # delete everything if nothing fills in this window
 POLL_INTERVAL_SECONDS = 0.5     # how often we check order/position state
 
 MAGIC_NUMBER = 990001           # unique tag so we only ever touch our own orders
@@ -251,7 +251,7 @@ def run():
         time.sleep(POLL_INTERVAL_SECONDS)
 
         # Safety valve for this TEST script only - don't run forever
-        if elapsed > 300:
+        if elapsed > 1000:
             log("5 minute test window elapsed. Stopping monitor (positions/orders left as-is).")
             break
 
