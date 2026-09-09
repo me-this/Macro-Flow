@@ -1,3 +1,5 @@
 tzdata
 MetaTrader5
-MetaTrader5 psutil
+psutil
+Flask
+flask-cors
