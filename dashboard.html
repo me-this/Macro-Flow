@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Macro-Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000000;
+    --surface: #141414;
+    --surface-alt: #1c1c1c;
+    --text: #ededed;
+    --text-muted: #8a8a8a;
+    --divider: #232323;
+    --status-up-dot: #4c9a72;
+    --status-up-text: #7fbf9e;
+    --status-down-dot: #c96b62;
+    --status-down-text: #d99089;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Roboto', sans-serif;
+    font-weight: 400;
+    line-height: 1.5;
+    padding: 32px 20px 64px;
+  }
+
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+
+  header .clock {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  section { margin-bottom: 48px; }
+
+  section h2 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+
+  /* ---------- Terminals ---------- */
+
+  .terminal-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+  }
+
+  .terminal-card {
+    background: var(--surface);
+    padding: 16px 18px;
+  }
+
+  .terminal-card .row-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .dot.up { background: var(--status-up-dot); }
+  .dot.down { background: var(--status-down-dot); }
+
+  .terminal-card .broker {
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .terminal-card .status-text {
+    font-size: 12px;
+    margin-left: auto;
+  }
+  .status-text.up { color: var(--status-up-text); }
+  .status-text.down { color: var(--status-down-text); }
+
+  .terminal-card .account {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .terminal-card .balance-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    padding: 4px 0;
+  }
+
+  .terminal-card .balance-row .label { color: var(--text-muted); }
+  .terminal-card .balance-row .value {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+  }
+
+  /* ---------- Tables (schedule + history) ---------- */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+
+  thead th {
+    text-align: left;
+    font-weight: 400;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 0 14px 10px;
+  }
+
+  thead th:first-child { padding-left: 18px; }
+
+  tbody tr {
+    background: var(--surface);
+  }
+
+  tbody tr:nth-child(even) {
+    background: var(--surface-alt);
+  }
+
+  tbody td {
+    padding: 12px 14px;
+    vertical-align: middle;
+  }
+
+  tbody td:first-child { padding-left: 18px; }
+
+  .event-name { font-weight: 700; }
+
+  .num { font-variant-numeric: tabular-nums; }
+
+  .muted { color: var(--text-muted); }
+
+  .result-pos { color: var(--status-up-text); font-weight: 700; }
+  .result-neg { color: var(--status-down-text); font-weight: 700; }
+
+  .empty-row td {
+    color: var(--text-muted);
+    font-style: normal;
+    padding: 24px 18px;
+  }
+
+  @media (max-width: 520px) {
+    thead { display: none; }
+    table, tbody, tr, td { display: block; width: 100%; }
+    tbody tr {
+      padding: 14px 16px;
+      margin-bottom: 8px;
+    }
+    tbody td {
+      padding: 3px 0;
+      display: flex;
+      justify-content: space-between;
+    }
+    tbody td::before {
+      content: attr(data-label);
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <header>
+      <h1>Macro-Flow</h1>
+      <span class="clock" id="clock">Nairobi time --:--:--</span>
+    </header>
+
+    <section>
+      <h2>Terminals</h2>
+      <div class="terminal-list">
+
+        <div class="terminal-card">
+          <div class="row-top">
+            <span class="dot up"></span>
+            <span class="broker">Exness</span>
+            <span class="status-text up">Connected</span>
+          </div>
+          <div class="account">Account 106616908</div>
+          <div class="balance-row"><span class="label">Balance</span><span class="value">$10.00</span></div>
+          <div class="balance-row"><span class="label">Equity</span><span class="value">$10.00</span></div>
+          <div class="balance-row"><span class="label">Open positions</span><span class="value">0</span></div>
+        </div>
+
+        <div class="terminal-card">
+          <div class="row-top">
+            <span class="dot down"></span>
+            <span class="broker">FBS</span>
+            <span class="status-text down">Not detected</span>
+          </div>
+          <div class="account">Terminal not running</div>
+          <div class="balance-row"><span class="label">Balance</span><span class="value muted">&mdash;</span></div>
+          <div class="balance-row"><span class="label">Equity</span><span class="value muted">&mdash;</span></div>
+          <div class="balance-row"><span class="label">Open positions</span><span class="value muted">&mdash;</span></div>
+        </div>
+
+      </div>
+    </section>
+
+    <section>
+      <h2>Macro schedule</h2>
+      <table>
+        <thead>
+          <tr><th>Event</th><th>Date</th><th>Time (ET)</th><th>Time (EAT)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="Event" class="event-name">PPI</td>
+            <td data-label="Date" class="num">Sep 10, 2026</td>
+            <td data-label="Time (ET)" class="num">08:30</td>
+            <td data-label="Time (EAT)" class="num">15:30</td>
+          </tr>
+          <tr>
+            <td data-label="Event" class="event-name">CPI</td>
+            <td data-label="Date" class="num">Sep 11, 2026</td>
+            <td data-label="Time (ET)" class="num">08:30</td>
+            <td data-label="Time (EAT)" class="num">15:30</td>
+          </tr>
+          <tr>
+            <td data-label="Event" class="event-name">FOMC Statement</td>
+            <td data-label="Date" class="num">Sep 16, 2026</td>
+            <td data-label="Time (ET)" class="num">14:00</td>
+            <td data-label="Time (EAT)" class="num">21:00</td>
+          </tr>
+          <tr>
+            <td data-label="Event" class="event-name">Non-Farm Employment Change</td>
+            <td data-label="Date" class="num">Oct 2, 2026</td>
+            <td data-label="Time (ET)" class="num">08:30</td>
+            <td data-label="Time (EAT)" class="num">15:30</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Execution history</h2>
+      <table>
+        <thead>
+          <tr><th>Event</th><th>Date</th><th>Side filled</th><th>Entry</th><th>Exit</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="Event" class="event-name">Mechanics test</td>
+            <td data-label="Date" class="num">Sep 9, 2026</td>
+            <td data-label="Side filled">Buy</td>
+            <td data-label="Entry" class="num">3,644.20</td>
+            <td data-label="Exit" class="num">3,642.70</td>
+            <td data-label="Result" class="result-neg num">&minus;150 pts</td>
+          </tr>
+          <tr class="empty-row">
+            <td colspan="6">No macro-triggered executions yet &mdash; PPI is the first live run, tomorrow.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+
+<script>
+  function updateClock() {
+    const now = new Date();
+    const eat = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Nairobi',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).format(now);
+    document.getElementById('clock').textContent = `Nairobi time ${eat}`;
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+</script>
+</body>
+  </html>
