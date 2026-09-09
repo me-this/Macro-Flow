@@ -17,7 +17,11 @@ STOP_DISTANCE_POINTS = 250
 INITIAL_SL_POINTS = 150
 BREAKEVEN_TRIGGER_POINTS = 150
 BREAKEVEN_LOCK_POINTS = 100
-
+DASHBOARD_API_PORT = 8787
+EXECUTION_LOG_PATH = "execution_log.jsonl"
+COUNTDOWN_LOG_START_SECONDS = 30 * 60   # start logging countdown 30 min before release
+COUNTDOWN_LOG_INTERVAL_SECONDS = 60     # log remaining time this often during the countdown
+SCHEDULER_IDLE_POLL_SECONDS = 60        # how often to recheck when no event is upcoming
 PRE_RELEASE_LEAD_SECONDS = 2                # place orders this many seconds BEFORE release
 POST_RELEASE_NO_FILL_TIMEOUT_SECONDS = 7    # delete unfilled orders this many seconds AFTER release
 POLL_INTERVAL_SECONDS = 0.25
