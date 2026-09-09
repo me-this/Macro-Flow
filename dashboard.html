@@ -14,7 +14,6 @@
     --surface-alt: #1c1c1c;
     --text: #ededed;
     --text-muted: #8a8a8a;
-    --divider: #232323;
     --status-up-dot: #4c9a72;
     --status-up-text: #7fbf9e;
     --status-down-dot: #c96b62;
@@ -32,25 +31,18 @@
     padding: 32px 20px 64px;
   }
 
-  .page {
-    max-width: 880px;
-    margin: 0 auto;
-  }
+  .page { max-width: 880px; margin: 0 auto; }
 
   header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin-bottom: 40px;
+    margin-bottom: 8px;
     flex-wrap: wrap;
     gap: 8px;
   }
 
-  header h1 {
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: 0.2px;
-  }
+  header h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.2px; }
 
   header .clock {
     font-size: 13px;
@@ -58,15 +50,36 @@
     font-variant-numeric: tabular-nums;
   }
 
-  section { margin-bottom: 48px; }
-
-  section h2 {
-    font-size: 15px;
-    font-weight: 700;
-    margin-bottom: 14px;
+  .next-event-banner {
+    background: var(--surface);
+    padding: 16px 18px;
+    margin-bottom: 40px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
-  /* ---------- Terminals ---------- */
+  .next-event-banner .label {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .next-event-banner .name {
+    font-weight: 700;
+    font-size: 15px;
+    margin-right: 12px;
+  }
+
+  .next-event-banner .countdown {
+    font-size: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  section { margin-bottom: 48px; }
+  section h2 { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
 
   .terminal-list {
     display: grid;
@@ -74,10 +87,7 @@
     gap: 10px;
   }
 
-  .terminal-card {
-    background: var(--surface);
-    padding: 16px 18px;
-  }
+  .terminal-card { background: var(--surface); padding: 16px 18px; }
 
   .terminal-card .row-top {
     display: flex;
@@ -86,25 +96,13 @@
     margin-bottom: 10px;
   }
 
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .dot.up { background: var(--status-up-dot); }
   .dot.down { background: var(--status-down-dot); }
 
-  .terminal-card .broker {
-    font-weight: 700;
-    font-size: 14px;
-  }
+  .terminal-card .broker { font-weight: 700; font-size: 14px; }
 
-  .terminal-card .status-text {
-    font-size: 12px;
-    margin-left: auto;
-  }
+  .terminal-card .status-text { font-size: 12px; margin-left: auto; }
   .status-text.up { color: var(--status-up-text); }
   .status-text.down { color: var(--status-down-text); }
 
@@ -123,18 +121,9 @@
   }
 
   .terminal-card .balance-row .label { color: var(--text-muted); }
-  .terminal-card .balance-row .value {
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-  }
+  .terminal-card .balance-row .value { font-variant-numeric: tabular-nums; font-weight: 700; }
 
-  /* ---------- Tables (schedule + history) ---------- */
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13.5px;
-  }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 
   thead th {
     text-align: left;
@@ -143,56 +132,27 @@
     font-size: 12px;
     padding: 0 14px 10px;
   }
-
   thead th:first-child { padding-left: 18px; }
 
-  tbody tr {
-    background: var(--surface);
-  }
-
-  tbody tr:nth-child(even) {
-    background: var(--surface-alt);
-  }
-
-  tbody td {
-    padding: 12px 14px;
-    vertical-align: middle;
-  }
-
+  tbody tr { background: var(--surface); }
+  tbody tr:nth-child(even) { background: var(--surface-alt); }
+  tbody td { padding: 12px 14px; vertical-align: middle; }
   tbody td:first-child { padding-left: 18px; }
 
   .event-name { font-weight: 700; }
-
   .num { font-variant-numeric: tabular-nums; }
-
   .muted { color: var(--text-muted); }
-
   .result-pos { color: var(--status-up-text); font-weight: 700; }
   .result-neg { color: var(--status-down-text); font-weight: 700; }
 
-  .empty-row td {
-    color: var(--text-muted);
-    font-style: normal;
-    padding: 24px 18px;
-  }
+  .empty-row td { color: var(--text-muted); padding: 24px 18px; }
 
   @media (max-width: 520px) {
     thead { display: none; }
     table, tbody, tr, td { display: block; width: 100%; }
-    tbody tr {
-      padding: 14px 16px;
-      margin-bottom: 8px;
-    }
-    tbody td {
-      padding: 3px 0;
-      display: flex;
-      justify-content: space-between;
-    }
-    tbody td::before {
-      content: attr(data-label);
-      color: var(--text-muted);
-      font-size: 12px;
-    }
+    tbody tr { padding: 14px 16px; margin-bottom: 8px; }
+    tbody td { padding: 3px 0; display: flex; justify-content: space-between; }
+    tbody td::before { content: attr(data-label); color: var(--text-muted); font-size: 12px; }
   }
 </style>
 </head>
@@ -204,34 +164,15 @@
       <span class="clock" id="clock">Nairobi time --:--:--</span>
     </header>
 
+    <div class="next-event-banner">
+      <div><span class="name" id="nextEventName">Loading schedule&hellip;</span><span class="label" id="nextEventTime"></span></div>
+      <div class="countdown" id="nextEventCountdown">&mdash;</div>
+    </div>
+
     <section>
       <h2>Terminals</h2>
-      <div class="terminal-list">
-
-        <div class="terminal-card">
-          <div class="row-top">
-            <span class="dot up"></span>
-            <span class="broker">Exness</span>
-            <span class="status-text up">Connected</span>
-          </div>
-          <div class="account">Account 106616908</div>
-          <div class="balance-row"><span class="label">Balance</span><span class="value">$10.00</span></div>
-          <div class="balance-row"><span class="label">Equity</span><span class="value">$10.00</span></div>
-          <div class="balance-row"><span class="label">Open positions</span><span class="value">0</span></div>
-        </div>
-
-        <div class="terminal-card">
-          <div class="row-top">
-            <span class="dot down"></span>
-            <span class="broker">FBS</span>
-            <span class="status-text down">Not detected</span>
-          </div>
-          <div class="account">Terminal not running</div>
-          <div class="balance-row"><span class="label">Balance</span><span class="value muted">&mdash;</span></div>
-          <div class="balance-row"><span class="label">Equity</span><span class="value muted">&mdash;</span></div>
-          <div class="balance-row"><span class="label">Open positions</span><span class="value muted">&mdash;</span></div>
-        </div>
-
+      <div class="terminal-list" id="terminalList">
+        <div class="terminal-card"><div class="account muted">Loading&hellip;</div></div>
       </div>
     </section>
 
@@ -239,33 +180,10 @@
       <h2>Macro schedule</h2>
       <table>
         <thead>
-          <tr><th>Event</th><th>Date</th><th>Time (ET)</th><th>Time (EAT)</th></tr>
+          <tr><th>Event</th><th>Date</th><th>Time (ET)</th><th>Time (EAT)</th><th>Countdown</th></tr>
         </thead>
-        <tbody>
-          <tr>
-            <td data-label="Event" class="event-name">PPI</td>
-            <td data-label="Date" class="num">Sep 10, 2026</td>
-            <td data-label="Time (ET)" class="num">08:30</td>
-            <td data-label="Time (EAT)" class="num">15:30</td>
-          </tr>
-          <tr>
-            <td data-label="Event" class="event-name">CPI</td>
-            <td data-label="Date" class="num">Sep 11, 2026</td>
-            <td data-label="Time (ET)" class="num">08:30</td>
-            <td data-label="Time (EAT)" class="num">15:30</td>
-          </tr>
-          <tr>
-            <td data-label="Event" class="event-name">FOMC Statement</td>
-            <td data-label="Date" class="num">Sep 16, 2026</td>
-            <td data-label="Time (ET)" class="num">14:00</td>
-            <td data-label="Time (EAT)" class="num">21:00</td>
-          </tr>
-          <tr>
-            <td data-label="Event" class="event-name">Non-Farm Employment Change</td>
-            <td data-label="Date" class="num">Oct 2, 2026</td>
-            <td data-label="Time (ET)" class="num">08:30</td>
-            <td data-label="Time (EAT)" class="num">15:30</td>
-          </tr>
+        <tbody id="scheduleBody">
+          <tr class="empty-row"><td colspan="5">Loading&hellip;</td></tr>
         </tbody>
       </table>
     </section>
@@ -276,18 +194,8 @@
         <thead>
           <tr><th>Event</th><th>Date</th><th>Side filled</th><th>Entry</th><th>Exit</th><th>Result</th></tr>
         </thead>
-        <tbody>
-          <tr>
-            <td data-label="Event" class="event-name">Mechanics test</td>
-            <td data-label="Date" class="num">Sep 9, 2026</td>
-            <td data-label="Side filled">Buy</td>
-            <td data-label="Entry" class="num">3,644.20</td>
-            <td data-label="Exit" class="num">3,642.70</td>
-            <td data-label="Result" class="result-neg num">&minus;150 pts</td>
-          </tr>
-          <tr class="empty-row">
-            <td colspan="6">No macro-triggered executions yet &mdash; PPI is the first live run, tomorrow.</td>
-          </tr>
+        <tbody id="historyBody">
+          <tr class="empty-row"><td colspan="6">Loading&hellip;</td></tr>
         </tbody>
       </table>
     </section>
@@ -295,16 +203,168 @@
   </div>
 
 <script>
+  // ---- EDIT THIS EACH SESSION ----
+  // bore's public URL/port changes on restart unless you pin a fixed remote
+  // port. Point this at wherever api_server.py is being tunneled to.
+  const API_BASE = "http://YOUR-BORE-URL:PORT";
+  // ---------------------------------
+
+  let scheduleCache = [];
+
+  function fmtCountdown(ms) {
+    if (ms <= 0) return "now";
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = n => String(n).padStart(2, "0");
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+
   function updateClock() {
     const now = new Date();
     const eat = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Africa/Nairobi',
-      hour: '2-digit', minute: '2-digit', second: '2-digit'
+      timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit', second: '2-digit'
     }).format(now);
     document.getElementById('clock').textContent = `Nairobi time ${eat}`;
   }
+
+  function tickCountdowns() {
+    const now = Date.now();
+
+    // Next-event banner
+    if (scheduleCache.length > 0) {
+      const next = scheduleCache[0];
+      const target = new Date(next.release_time_utc).getTime();
+      document.getElementById('nextEventName').textContent = next.event;
+      document.getElementById('nextEventTime').textContent =
+        " — " + new Date(next.release_time_utc).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi' }) + " EAT";
+      document.getElementById('nextEventCountdown').textContent = fmtCountdown(target - now);
+    } else {
+      document.getElementById('nextEventName').textContent = "No macro event in the next 6 hours";
+      document.getElementById('nextEventTime').textContent = "";
+      document.getElementById('nextEventCountdown').textContent = "";
+    }
+
+    // Per-row countdowns in the schedule table
+    document.querySelectorAll('[data-target]').forEach(el => {
+      const target = parseInt(el.getAttribute('data-target'), 10);
+      el.textContent = fmtCountdown(target - now);
+    });
+  }
+
+  async function fetchTerminals() {
+    try {
+      const res = await fetch(`${API_BASE}/api/terminals`);
+      const data = await res.json();
+      const list = document.getElementById('terminalList');
+
+      if (!data.length) {
+        list.innerHTML = `<div class="terminal-card"><div class="account muted">No MT5 terminals detected</div></div>`;
+        return;
+      }
+
+      list.innerHTML = data.map(t => {
+        const up = t.connected;
+        return `
+          <div class="terminal-card">
+            <div class="row-top">
+              <span class="dot ${up ? 'up' : 'down'}"></span>
+              <span class="broker">${up ? (t.broker || 'Unknown broker') : 'Terminal'}</span>
+              <span class="status-text ${up ? 'up' : 'down'}">${up ? 'Connected' : 'Not connected'}</span>
+            </div>
+            <div class="account">${up ? `Account ${t.account}` : (t.error || 'Could not connect')}</div>
+            <div class="balance-row"><span class="label">Balance</span><span class="value">${up ? '$' + t.balance.toFixed(2) : '—'}</span></div>
+            <div class="balance-row"><span class="label">Equity</span><span class="value">${up ? '$' + t.equity.toFixed(2) : '—'}</span></div>
+            <div class="balance-row"><span class="label">Open positions</span><span class="value">${up ? t.open_positions : '—'}</span></div>
+          </div>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('terminalList').innerHTML =
+        `<div class="terminal-card"><div class="account muted">Could not reach API: ${e.message}</div></div>`;
+    }
+  }
+
+  async function fetchSchedule() {
+    try {
+      const res = await fetch(`${API_BASE}/api/schedule`);
+      const data = await res.json();
+      scheduleCache = data;
+      const body = document.getElementById('scheduleBody');
+
+      if (!data.length) {
+        body.innerHTML = `<tr class="empty-row"><td colspan="5">No macro events in the next 6 hours.</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = data.map(e => {
+        const dt = new Date(e.release_time_utc);
+        const et = dt.toLocaleString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' });
+        const eat = dt.toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' });
+        const dateStr = dt.toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi', month: 'short', day: 'numeric', year: 'numeric' });
+        return `
+          <tr>
+            <td data-label="Event" class="event-name">${e.event}</td>
+            <td data-label="Date" class="num">${dateStr}</td>
+            <td data-label="Time (ET)" class="num">${et}</td>
+            <td data-label="Time (EAT)" class="num">${eat}</td>
+            <td data-label="Countdown" class="num" data-target="${dt.getTime()}">--:--</td>
+          </tr>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('scheduleBody').innerHTML =
+        `<tr class="empty-row"><td colspan="5">Could not reach API: ${e.message}</td></tr>`;
+    }
+  }
+
+  async function fetchHistory() {
+    try {
+      const res = await fetch(`${API_BASE}/api/history`);
+      const data = await res.json();
+      const body = document.getElementById('historyBody');
+
+      if (!data.length) {
+        body.innerHTML = `<tr class="empty-row"><td colspan="6">No macro-triggered executions yet.</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = data.map(r => {
+        const dt = new Date(r.release_time_utc);
+        const dateStr = dt.toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi', month: 'short', day: 'numeric', year: 'numeric' });
+
+        let resultHtml = '<span class="muted">&mdash;</span>';
+        if (r.entry != null && r.exit != null && (r.side === 'buy' || r.side === 'sell')) {
+          const delta = r.side === 'buy' ? (r.exit - r.entry) : (r.entry - r.exit);
+          const cls = delta >= 0 ? 'result-pos' : 'result-neg';
+          resultHtml = `<span class="${cls}">${delta >= 0 ? '+' : ''}${delta.toFixed(2)}</span>`;
+        } else if (r.outcome) {
+          resultHtml = `<span class="muted">${r.outcome.replace(/_/g, ' ')}</span>`;
+        }
+
+        return `
+          <tr>
+            <td data-label="Event" class="event-name">${r.event}</td>
+            <td data-label="Date" class="num">${dateStr}</td>
+            <td data-label="Side filled">${r.side || '—'}</td>
+            <td data-label="Entry" class="num">${r.entry != null ? r.entry.toFixed(2) : '—'}</td>
+            <td data-label="Exit" class="num">${r.exit != null ? r.exit.toFixed(2) : '—'}</td>
+            <td data-label="Result">${resultHtml}</td>
+          </tr>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('historyBody').innerHTML =
+        `<tr class="empty-row"><td colspan="6">Could not reach API: ${e.message}</td></tr>`;
+    }
+  }
+
   updateClock();
   setInterval(updateClock, 1000);
+  setInterval(tickCountdowns, 1000);
+
+  fetchTerminals(); fetchSchedule(); fetchHistory();
+  setInterval(fetchTerminals, 15000);
+  setInterval(fetchSchedule, 30000);
+  setInterval(fetchHistory, 30000);
 </script>
 </body>
-  </html>
+</html>
