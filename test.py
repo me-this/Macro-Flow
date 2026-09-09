@@ -59,12 +59,16 @@ def connect():
 
 def get_filling_mode(symbol_info):
     """Pick an order filling mode the broker actually supports.
-    Different brokers allow different subsets - this checks the symbol's
-    filling_mode bitmask rather than assuming."""
+    Note: the filling_mode bitmask uses SYMBOL_FILLING_* bit values,
+    which the Python MetaTrader5 package doesn't expose as constants -
+    so we hardcode them here (FOK=1, IOC=2, per MQL5 docs)."""
+    SYMBOL_FILLING_FOK = 1
+    SYMBOL_FILLING_IOC = 2
+
     mode = symbol_info.filling_mode
-    if mode & mt5.SYMBOL_FILLING_IOC:
+    if mode & SYMBOL_FILLING_IOC:
         return mt5.ORDER_FILLING_IOC
-    if mode & mt5.SYMBOL_FILLING_FOK:
+    if mode & SYMBOL_FILLING_FOK:
         return mt5.ORDER_FILLING_FOK
     return mt5.ORDER_FILLING_RETURN
 
