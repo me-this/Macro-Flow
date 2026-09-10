@@ -13,6 +13,8 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+import os
+from flask import send_from_directory
 
 import MetaTrader5 as mt5
 from flask import Flask, jsonify
@@ -82,6 +84,9 @@ def get_schedule():
     upcoming.sort(key=lambda e: e["seconds_until"])
     return jsonify(upcoming)
 
+@app.route("/")
+def dashboard():
+    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 
 @app.route("/api/history")
 def get_history():
