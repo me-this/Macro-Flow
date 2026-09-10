@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 import config
 import api_server
 from terminal_detector import find_mt5_terminals
-
+import tunnel
 
 def get_events_in_window(hours_ahead=6):
     now_utc = datetime.now(timezone.utc)
@@ -84,6 +84,13 @@ def countdown_and_launch(event_name, release_time_utc):
 
 def main():
     threading.Thread(target=api_server.run_api_server, daemon=True).start()
+    print(f"[main] Dashboard API server running on port {config.DASHBOARD_API_PORT}.")
+
+    time.sleep(2)  # give Flask a moment to actually bind before bore tries to relay to it
+    bore_process, dashboard_url = tunnel.start_tunnel(config.DASHBOARD_API_PORT)
+    print(f"[main] ============================================")
+    print(f"[main] DASHBOARD READY: {dashboard_url}/")
+    print(f"[main] ============================================")
     print(f"[main] Dashboard API server running on port {config.DASHBOARD_API_PORT}.")
 
     while True:
