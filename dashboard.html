@@ -206,7 +206,6 @@
   // ---- EDIT THIS EACH SESSION ----
   // bore's public URL/port changes on restart unless you pin a fixed remote
   // port. Point this at wherever api_server.py is being tunneled to.
-  const API_BASE = "http://YOUR-BORE-URL:PORT";
   // ---------------------------------
 
   let scheduleCache = [];
@@ -255,7 +254,7 @@
 
   async function fetchTerminals() {
     try {
-      const res = await fetch(`${API_BASE}/api/terminals`);
+      const res = await fetch(`/api/terminals`);
       const data = await res.json();
       const list = document.getElementById('terminalList');
 
@@ -287,7 +286,7 @@
 
   async function fetchSchedule() {
     try {
-      const res = await fetch(`${API_BASE}/api/schedule`);
+      const res = await fetch(`/api/schedule`);
       const data = await res.json();
       scheduleCache = data;
       const body = document.getElementById('scheduleBody');
@@ -319,7 +318,7 @@
 
   async function fetchHistory() {
     try {
-      const res = await fetch(`${API_BASE}/api/history`);
+      const res = await fetch(`/api/history`);
       const data = await res.json();
       const body = document.getElementById('historyBody');
 
