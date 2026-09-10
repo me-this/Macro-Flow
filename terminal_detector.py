@@ -1,4 +1,4 @@
-"""
+r"""
 terminal_detector.py - find all running MT5 terminal instances on this Windows machine.
 
 CAVEAT: the MetaTrader5 Python package connects to a terminal via its executable
