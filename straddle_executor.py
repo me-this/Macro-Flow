@@ -8,8 +8,25 @@ etc). This script searches the terminal's own symbol list for anything
 starting with config.SYMBOL and uses whatever it finds - no manual editing
 needed per broker.
 
-Exit rule: ALL open positions are force-closed exactly EXIT_SECONDS_AFTER_RELEASE
-seconds after the official release time, regardless of breakeven state or P&L.
+EXIT / DELETION LOGIC (updated after the Sep 11 CPI run):
+  - If NEITHER side has filled at all by POST_RELEASE_NO_FILL_TIMEOUT_SECONDS
+    after release, delete every pending order and stop - this is the
+    "no real surprise happened" case.
+  - Once ANY fill happens on EITHER side, the opposite side is left alone -
+    it is NOT deleted anymore. This is deliberate: a fast initial move can
+    reverse hard before the delete request completes (this happened during
+    the Sep 11 CPI release - see CPI_logs.md), and by the time that
+    reversal lands, the "opposite" side may already be filling for real.
+    Both sides are allowed to be open simultaneously; each side's own SL
+    is what cuts the wrong-direction exposure, not an early delete.
+  - At exactly EXIT_SECONDS_AFTER_RELEASE seconds after release: close
+    every open position (regardless of side or P&L) AND delete any orders
+    still pending on either side at that moment. This is the one and only
+    hard stop for the whole sequence.
+  - Positions that disappear on their own before the hard exit (i.e. an SL
+    was hit) are detected and logged with their actual close price/result,
+    pulled from MT5's deal history - previously this only showed up as a
+    position silently vanishing with no log line explaining why.
 
 Standalone usage:
     python straddle_executor.py --terminal-path "C:\path\to\terminal64.exe" --event-name "CPI" --release-time-utc "2026-09-11T12:30:00+00:00"
@@ -28,9 +45,6 @@ def log(tag, msg):
 
 
 def resolve_symbol(base_symbol, event_name):
-    """Finds the broker's actual name for gold (XAUUSD, XAUUSDc, XAUUSD.m, etc)
-    by searching all symbols this terminal knows about. Prefers an exact match;
-    otherwise picks the shortest matching name (fewest suffix characters)."""
     all_symbols = mt5.symbols_get()
     if not all_symbols:
         raise RuntimeError("No symbols returned by terminal - check MT5 connection.")
@@ -173,7 +187,8 @@ def delete_pending_orders(tickets, label, event_name):
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             log(event_name, f"DELETED {label} order {ticket} (unfilled)")
         else:
-            log(event_name, f"DELETE FAILED for {label} order {ticket}: retcode={result.retcode}")
+            log(event_name, f"DELETE FAILED for {label} order {ticket}: retcode={result.retcode} "
+                             f"(likely already filled/gone - not necessarily an error)")
 
 
 def get_our_positions(symbol):
@@ -183,15 +198,15 @@ def get_our_positions(symbol):
     return [p for p in positions if p.magic == config.MAGIC_NUMBER]
 
 
-def log_fill_slippage(symbol, symbol_info, side_label, intended_price, event_name, release_time_utc):
-    """Compares each newly-filled position's real entry price against the
-    order's intended stop price, so slippage is visible immediately in the log."""
-    point = symbol_info.point
-    seconds_since_release = (datetime.now(timezone.utc) - release_time_utc).total_seconds()
+def log_new_fills(symbol, side_label, intended_price, point, event_name, release_time_utc, logged_tickets):
+    """Logs each position on this side the FIRST time it's seen, with
+    slippage vs the intended stop price. Safe to call every poll - only
+    logs tickets not already in logged_tickets."""
     want_type = mt5.ORDER_TYPE_BUY if side_label == "buy" else mt5.ORDER_TYPE_SELL
+    seconds_since_release = (datetime.now(timezone.utc) - release_time_utc).total_seconds()
 
     for pos in get_our_positions(symbol):
-        if pos.type != want_type:
+        if pos.type != want_type or pos.ticket in logged_tickets:
             continue
         actual = pos.price_open
         slippage_points = (actual - intended_price) / point if side_label == "buy" else (intended_price - actual) / point
@@ -199,6 +214,40 @@ def log_fill_slippage(symbol, symbol_info, side_label, intended_price, event_nam
                          f"intended={intended_price} actual={actual} "
                          f"slippage={slippage_points:+.1f}pts "
                          f"t+{seconds_since_release:.2f}s since release")
+        logged_tickets.add(pos.ticket)
+
+
+def detect_external_closes(symbol, symbol_info, known_positions, event_name):
+    """Detects positions that vanished since the last poll WITHOUT us having
+    closed them ourselves (i.e. hit their SL). Logs the real close price and
+    P&L pulled from MT5's own deal history, so an SL hit is no longer silent."""
+    point = symbol_info.point
+    current_positions = get_our_positions(symbol)
+    current_tickets = {p.ticket for p in current_positions}
+
+    for ticket, info in list(known_positions.items()):
+        if ticket in current_tickets:
+            continue
+        deals = mt5.history_deals_get(position=ticket)
+        close_deal = deals[-1] if deals else None
+        if close_deal:
+            exit_price = close_deal.price
+            pnl_points = (exit_price - info["entry"]) if info["side"] == "buy" else (info["entry"] - exit_price)
+            pnl_points /= point
+            log(event_name, f"POSITION CLOSED EXTERNALLY (likely SL hit) ticket={ticket} "
+                             f"side={info['side']} entry={info['entry']} exit={exit_price} result={pnl_points:+.1f}pts")
+            append_execution_log(event_name, info["release_time_utc"], info["side"], info["entry"], exit_price, "sl_hit")
+        else:
+            log(event_name, f"POSITION CLOSED EXTERNALLY ticket={ticket} (could not fetch close deal from history)")
+        del known_positions[ticket]
+
+    for pos in current_positions:
+        if pos.ticket not in known_positions:
+            known_positions[pos.ticket] = {
+                "side": "buy" if pos.type == mt5.ORDER_TYPE_BUY else "sell",
+                "entry": pos.price_open,
+                "release_time_utc": None,  # filled in by caller before first use
+            }
 
 
 def manage_breakeven(symbol, symbol_info, breakeven_done, event_name):
@@ -251,7 +300,7 @@ def close_all_positions(symbol, symbol_info, event_name, release_time_utc):
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             pnl_points = (close_price - pos.price_open) if side == "buy" else (pos.price_open - close_price)
             pnl_points /= symbol_info.point
-            log(event_name, f"HARD EXIT CLOSED position={pos.ticket} entry={pos.price_open} "
+            log(event_name, f"HARD EXIT CLOSED position={pos.ticket} side={side} entry={pos.price_open} "
                              f"exit={close_price} result={pnl_points:+.1f}pts")
             append_execution_log(event_name, release_time_utc, side, pos.price_open, close_price, "closed_60s")
         else:
@@ -273,8 +322,10 @@ def run(terminal_path, event_name, release_time_utc):
         mt5.shutdown()
         return
 
-    opposite_cleared = False
+    point = symbol_info.point
+    buy_logged, sell_logged = set(), set()
     breakeven_done = set()
+    known_positions = {}
     hard_exit_done = False
 
     log(event_name, "MONITORING for fills...")
@@ -282,35 +333,46 @@ def run(terminal_path, event_name, release_time_utc):
         now = datetime.now(timezone.utc)
         seconds_since_release = (now - release_time_utc).total_seconds()
 
-        buy_still_pending = get_still_pending(symbol, buy_tickets)
-        sell_still_pending = get_still_pending(symbol, sell_tickets)
-        buy_filled = len(buy_still_pending) < len(buy_tickets)
-        sell_filled = len(sell_still_pending) < len(sell_tickets)
+        # Log any newly-filled positions on either side (no deletion tied to this anymore)
+        log_new_fills(symbol, "buy", buy_stop_price, point, event_name, release_time_utc, buy_logged)
+        log_new_fills(symbol, "sell", sell_stop_price, point, event_name, release_time_utc, sell_logged)
 
-        if not opposite_cleared and (buy_filled or sell_filled):
-            if buy_filled and sell_still_pending:
-                log_fill_slippage(symbol, symbol_info, "buy", buy_stop_price, event_name, release_time_utc)
-                log(event_name, f"BUY SIDE FILLED -> deleting {len(sell_still_pending)} unfilled sell stop(s)")
-                delete_pending_orders(sell_still_pending, "sell", event_name)
-            elif sell_filled and buy_still_pending:
-                log_fill_slippage(symbol, symbol_info, "sell", sell_stop_price, event_name, release_time_utc)
-                log(event_name, f"SELL SIDE FILLED -> deleting {len(buy_still_pending)} unfilled buy stop(s)")
-                delete_pending_orders(buy_still_pending, "buy", event_name)
-            opposite_cleared = True
+        # Detect and log any position that closed on its own (SL hit) before hard exit
+        for ticket in list(known_positions.keys()):
+            if known_positions[ticket]["release_time_utc"] is None:
+                known_positions[ticket]["release_time_utc"] = release_time_utc
+        detect_external_closes(symbol, symbol_info, known_positions, event_name)
+        for ticket in known_positions:
+            if known_positions[ticket]["release_time_utc"] is None:
+                known_positions[ticket]["release_time_utc"] = release_time_utc
 
+        # Breakeven applies to whatever's open on either side
         if get_our_positions(symbol):
             manage_breakeven(symbol, symbol_info, breakeven_done, event_name)
 
-        if not opposite_cleared and seconds_since_release > config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS:
+        # NO-FILL CASE: nothing has EVER filled on either side by the timeout -> clean slate, done
+        no_positions_yet = not buy_logged and not sell_logged
+        if no_positions_yet and seconds_since_release > config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS:
             log(event_name, f"NO FILL after {config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS}s post-release. Deleting all.")
-            delete_pending_orders(buy_still_pending, "buy", event_name)
-            delete_pending_orders(sell_still_pending, "sell", event_name)
+            delete_pending_orders(get_still_pending(symbol, buy_tickets), "buy", event_name)
+            delete_pending_orders(get_still_pending(symbol, sell_tickets), "sell", event_name)
             append_execution_log(event_name, release_time_utc, "none", None, None, "no_fill")
             break
 
+        # HARD EXIT: fixed 60s mark - close everything open, delete everything still pending, no exceptions
         if not hard_exit_done and seconds_since_release >= config.EXIT_SECONDS_AFTER_RELEASE:
             log(event_name, f"HARD EXIT TRIGGERED at t+{seconds_since_release:.2f}s since release.")
             close_all_positions(symbol, symbol_info, event_name, release_time_utc)
+
+            remaining_buy = get_still_pending(symbol, buy_tickets)
+            remaining_sell = get_still_pending(symbol, sell_tickets)
+            if remaining_buy:
+                log(event_name, f"Cleaning up {len(remaining_buy)} still-pending buy order(s) at hard exit.")
+                delete_pending_orders(remaining_buy, "buy", event_name)
+            if remaining_sell:
+                log(event_name, f"Cleaning up {len(remaining_sell)} still-pending sell order(s) at hard exit.")
+                delete_pending_orders(remaining_sell, "sell", event_name)
+
             hard_exit_done = True
             break
 
