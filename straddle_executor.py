@@ -3,30 +3,11 @@ straddle_executor.py - runs the full straddle sequence for ONE MT5 terminal
 against ONE scheduled macro event. Spawned as a subprocess by main.py, once
 per detected terminal, so every open terminal trades in parallel.
 
-Symbol resolution: brokers label gold differently (XAUUSD, XAUUSDc, XAUUSD.m,
-etc). This script searches the terminal's own symbol list for anything
-starting with config.SYMBOL and uses whatever it finds - no manual editing
-needed per broker.
-
-EXIT / DELETION LOGIC (updated after the Sep 11 CPI run):
-  - If NEITHER side has filled at all by POST_RELEASE_NO_FILL_TIMEOUT_SECONDS
-    after release, delete every pending order and stop - this is the
-    "no real surprise happened" case.
-  - Once ANY fill happens on EITHER side, the opposite side is left alone -
-    it is NOT deleted anymore. This is deliberate: a fast initial move can
-    reverse hard before the delete request completes (this happened during
-    the Sep 11 CPI release - see CPI_logs.md), and by the time that
-    reversal lands, the "opposite" side may already be filling for real.
-    Both sides are allowed to be open simultaneously; each side's own SL
-    is what cuts the wrong-direction exposure, not an early delete.
-  - At exactly EXIT_SECONDS_AFTER_RELEASE seconds after release: close
-    every open position (regardless of side or P&L) AND delete any orders
-    still pending on either side at that moment. This is the one and only
-    hard stop for the whole sequence.
-  - Positions that disappear on their own before the hard exit (i.e. an SL
-    was hit) are detected and logged with their actual close price/result,
-    pulled from MT5's deal history - previously this only showed up as a
-    position silently vanishing with no log line explaining why.
+SAFETY: if connect()/setup takes long enough to eat the entire pre-release
+lead-time buffer, this ABORTS placing the straddle for this terminal rather
+than placing orders into an already-moved market (this happened during the
+Sep 16 FOMC run - see FOMC_logs.md - and produced pure negative-slippage
+losing trades with no real straddle exposure at all).
 
 Standalone usage:
     python straddle_executor.py --terminal-path "C:\path\to\terminal64.exe" --event-name "CPI" --release-time-utc "2026-09-11T12:30:00+00:00"
@@ -139,7 +120,8 @@ def place_straddle(symbol, symbol_info, event_name):
     sell_sl = round(sell_stop_price + config.INITIAL_SL_POINTS * point, symbol_info.digits)
 
     log(event_name, f"PLACING STRADDLE. Mid={mid_price} BuyStop(intended)={buy_stop_price} "
-                     f"SellStop(intended)={sell_stop_price} SL_dist={config.INITIAL_SL_POINTS}pts")
+                     f"SellStop(intended)={sell_stop_price} SL_dist={config.INITIAL_SL_POINTS}pts "
+                     f"OrdersPerSide={config.NUM_ORDERS_PER_SIDE}")
 
     buy_tickets, sell_tickets = [], []
 
@@ -199,9 +181,6 @@ def get_our_positions(symbol):
 
 
 def log_new_fills(symbol, side_label, intended_price, point, event_name, release_time_utc, logged_tickets):
-    """Logs each position on this side the FIRST time it's seen, with
-    slippage vs the intended stop price. Safe to call every poll - only
-    logs tickets not already in logged_tickets."""
     want_type = mt5.ORDER_TYPE_BUY if side_label == "buy" else mt5.ORDER_TYPE_SELL
     seconds_since_release = (datetime.now(timezone.utc) - release_time_utc).total_seconds()
 
@@ -218,9 +197,6 @@ def log_new_fills(symbol, side_label, intended_price, point, event_name, release
 
 
 def detect_external_closes(symbol, symbol_info, known_positions, event_name):
-    """Detects positions that vanished since the last poll WITHOUT us having
-    closed them ourselves (i.e. hit their SL). Logs the real close price and
-    P&L pulled from MT5's own deal history, so an SL hit is no longer silent."""
     point = symbol_info.point
     current_positions = get_our_positions(symbol)
     current_tickets = {p.ticket for p in current_positions}
@@ -246,7 +222,7 @@ def detect_external_closes(symbol, symbol_info, known_positions, event_name):
             known_positions[pos.ticket] = {
                 "side": "buy" if pos.type == mt5.ORDER_TYPE_BUY else "sell",
                 "entry": pos.price_open,
-                "release_time_utc": None,  # filled in by caller before first use
+                "release_time_utc": None,
             }
 
 
@@ -308,17 +284,66 @@ def close_all_positions(symbol, symbol_info, event_name, release_time_utc):
             append_execution_log(event_name, release_time_utc, side, pos.price_open, None, f"close_failed_{result.retcode}")
 
 
+def reconciliation_sweep(symbol, event_name, release_time_utc):
+    """Authoritative final pass over MT5's own deal history for this event -
+    independent of live polling, so anything that opened and closed entirely
+    between two poll cycles (invisible to live logs) still shows up here."""
+    try:
+        date_from = release_time_utc - timedelta(seconds=30)
+        date_to = datetime.now(timezone.utc) + timedelta(seconds=5)
+        deals = mt5.history_deals_get(date_from, date_to)
+        if not deals:
+            log(event_name, "RECONCILIATION: no deals found in history for this window.")
+            return
+
+        our_deals = [d for d in deals if d.magic == config.MAGIC_NUMBER and d.symbol == symbol]
+        if not our_deals:
+            log(event_name, "RECONCILIATION: no deals with our magic number found.")
+            return
+
+        log(event_name, f"RECONCILIATION: {len(our_deals)} deal(s) in MT5 history for this event "
+                         f"(authoritative record - may repeat lines already logged live above):")
+        for d in sorted(our_deals, key=lambda x: x.time):
+            deal_time = datetime.fromtimestamp(d.time, tz=timezone.utc)
+            entry_exit = "ENTRY" if d.entry == mt5.DEAL_ENTRY_IN else ("EXIT" if d.entry == mt5.DEAL_ENTRY_OUT else "OTHER")
+            side = "buy" if d.type == mt5.DEAL_TYPE_BUY else "sell"
+            log(event_name, f"RECONCILIATION [{entry_exit}] position={d.position_id} side={side} "
+                             f"price={d.price} profit={d.profit} time={deal_time.isoformat()}")
+    except Exception as e:
+        log(event_name, f"RECONCILIATION FAILED: {e}")
+
+
 def run(terminal_path, event_name, release_time_utc):
+    subprocess_start = datetime.now(timezone.utc)
+    log(event_name, f"SUBPROCESS STARTED at {subprocess_start.isoformat()}")
+
     symbol_info, symbol = connect(terminal_path, event_name)
+    setup_done = datetime.now(timezone.utc)
+    setup_duration = (setup_done - subprocess_start).total_seconds()
+    log(event_name, f"SETUP (connect+resolve symbol) took {setup_duration:.2f}s")
+
     check_broker_time_offset(symbol, event_name)
 
     place_at_dt = release_time_utc - timedelta(seconds=config.PRE_RELEASE_LEAD_SECONDS)
+    now_after_setup = datetime.now(timezone.utc)
+
+    if now_after_setup >= place_at_dt:
+        overrun = (now_after_setup - place_at_dt).total_seconds()
+        log(event_name, f"CRITICAL: setup took too long - intended placement time already passed "
+                         f"by {overrun:.2f}s before we could even wait for it. ABORTING straddle for "
+                         f"this terminal (placing now would just chase an already-moved market, not "
+                         f"straddle it - see the Sep 16 FOMC run for what this looks like when it isn't caught).")
+        append_execution_log(event_name, release_time_utc, "none", None, None, "aborted_late_setup")
+        mt5.shutdown()
+        return
+
     log(event_name, f"WAITING until {place_at_dt.isoformat()} to place straddle (release at {release_time_utc.isoformat()})")
     wait_until(place_at_dt)
 
     buy_tickets, sell_tickets, buy_stop_price, sell_stop_price = place_straddle(symbol, symbol_info, event_name)
     if not buy_tickets and not sell_tickets:
         log(event_name, "No orders placed successfully. Exiting.")
+        reconciliation_sweep(symbol, event_name, release_time_utc)
         mt5.shutdown()
         return
 
@@ -333,24 +358,17 @@ def run(terminal_path, event_name, release_time_utc):
         now = datetime.now(timezone.utc)
         seconds_since_release = (now - release_time_utc).total_seconds()
 
-        # Log any newly-filled positions on either side (no deletion tied to this anymore)
         log_new_fills(symbol, "buy", buy_stop_price, point, event_name, release_time_utc, buy_logged)
         log_new_fills(symbol, "sell", sell_stop_price, point, event_name, release_time_utc, sell_logged)
 
-        # Detect and log any position that closed on its own (SL hit) before hard exit
-        for ticket in list(known_positions.keys()):
-            if known_positions[ticket]["release_time_utc"] is None:
-                known_positions[ticket]["release_time_utc"] = release_time_utc
         detect_external_closes(symbol, symbol_info, known_positions, event_name)
         for ticket in known_positions:
             if known_positions[ticket]["release_time_utc"] is None:
                 known_positions[ticket]["release_time_utc"] = release_time_utc
 
-        # Breakeven applies to whatever's open on either side
         if get_our_positions(symbol):
             manage_breakeven(symbol, symbol_info, breakeven_done, event_name)
 
-        # NO-FILL CASE: nothing has EVER filled on either side by the timeout -> clean slate, done
         no_positions_yet = not buy_logged and not sell_logged
         if no_positions_yet and seconds_since_release > config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS:
             log(event_name, f"NO FILL after {config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS}s post-release. Deleting all.")
@@ -359,7 +377,6 @@ def run(terminal_path, event_name, release_time_utc):
             append_execution_log(event_name, release_time_utc, "none", None, None, "no_fill")
             break
 
-        # HARD EXIT: fixed 60s mark - close everything open, delete everything still pending, no exceptions
         if not hard_exit_done and seconds_since_release >= config.EXIT_SECONDS_AFTER_RELEASE:
             log(event_name, f"HARD EXIT TRIGGERED at t+{seconds_since_release:.2f}s since release.")
             close_all_positions(symbol, symbol_info, event_name, release_time_utc)
@@ -378,6 +395,7 @@ def run(terminal_path, event_name, release_time_utc):
 
         time.sleep(config.POLL_INTERVAL_SECONDS)
 
+    reconciliation_sweep(symbol, event_name, release_time_utc)
     log(event_name, "DONE with this event on this terminal.")
     mt5.shutdown()
 
