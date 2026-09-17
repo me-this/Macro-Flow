@@ -23,8 +23,8 @@ COUNTDOWN_LOG_START_SECONDS = 30 * 60   # start logging countdown 30 min before 
 COUNTDOWN_LOG_INTERVAL_SECONDS = 60     # log remaining time this often during the countdown
 SCHEDULER_IDLE_POLL_SECONDS = 60        # how often to recheck when no event is upcoming
 PRE_RELEASE_LEAD_SECONDS = 3               # place orders this many seconds BEFORE release
-POST_RELEASE_NO_FILL_TIMEOUT_SECONDS = 5    # delete unfilled orders this many seconds AFTER release
-POLL_INTERVAL_SECONDS = 0.25
+POST_RELEASE_NO_FILL_TIMEOUT_SECONDS = 6  # delete unfilled orders this many seconds AFTER release
+POLL_INTERVAL_SECONDS = 0.01
 QUIET_WINDOW_BEFORE_SECONDS = 30   # dashboard stops polling MT5 this long before a scheduled release
 QUIET_WINDOW_AFTER_SECONDS = 90    # ...and resumes this long after
 
