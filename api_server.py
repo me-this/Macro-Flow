@@ -1,23 +1,21 @@
 """
-api_server.py - lightweight HTTP API for the dashboard. Started as a
-background thread from main.py so it's alive for the entire RDP session,
-independent of whether any macro event is currently scheduled.
+api_server.py - lightweight HTTP API for the dashboard.
 
-Endpoints:
-  GET /api/terminals - detected MT5 terminals + live balance/equity
-  GET /api/schedule  - upcoming macro events with countdown
-  GET /api/history   - past executed events (read from EXECUTION_LOG_PATH)
+Includes a "quiet window" around every scheduled macro event: MT5
+polling pauses from QUIET_WINDOW_BEFORE_SECONDS before a release to
+QUIET_WINDOW_AFTER_SECONDS after, so this background thread never
+contends with straddle_executor.py for the same terminal connection
+during the precision-critical window (this was the leading suspect
+for a 2+ second setup delay observed during the Sep 16 FOMC run).
 """
 import json
 import os
 import threading
 import time
-from datetime import datetime, timezone
-import os
-from flask import send_from_directory
+from datetime import datetime, timedelta, timezone
 
 import MetaTrader5 as mt5
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
 import config
@@ -28,15 +26,37 @@ CORS(app)
 
 _state_lock = threading.Lock()
 _terminal_state = []
+_was_in_quiet_window = False
+
+
+def _in_quiet_window():
+    now_utc = datetime.now(timezone.utc)
+    for evt in config.MACRO_SCHEDULE_2026:
+        release_utc = evt["datetime_et"].astimezone(timezone.utc)
+        window_start = release_utc - timedelta(seconds=config.QUIET_WINDOW_BEFORE_SECONDS)
+        window_end = release_utc + timedelta(seconds=config.QUIET_WINDOW_AFTER_SECONDS)
+        if window_start <= now_utc <= window_end:
+            return True, evt["event"]
+    return False, None
 
 
 def _poll_terminals_loop():
-    """Sequentially connects to each detected terminal, reads balance/equity,
-    disconnects, moves to the next. Safe to run in this process because
-    main.py's own process never holds an MT5 connection itself - the actual
-    trading logic runs in separate straddle_executor.py subprocesses."""
-    global _terminal_state
+    global _terminal_state, _was_in_quiet_window
     while True:
+        quiet, event_name = _in_quiet_window()
+
+        if quiet:
+            if not _was_in_quiet_window:
+                print(f"[api_server] Entering quiet window for {event_name} - "
+                      f"pausing MT5 dashboard polling.")
+            _was_in_quiet_window = True
+            time.sleep(2)  # check frequently so we resume promptly once the window ends
+            continue
+
+        if _was_in_quiet_window:
+            print("[api_server] Quiet window ended - resuming MT5 dashboard polling.")
+        _was_in_quiet_window = False
+
         results = []
         for path in find_mt5_terminals():
             entry = {"path": path, "connected": False}
@@ -60,7 +80,12 @@ def _poll_terminals_loop():
 
         with _state_lock:
             _terminal_state = results
-        time.sleep(15)  # balances don't need faster polling than this
+        time.sleep(15)
+
+
+@app.route("/")
+def dashboard():
+    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 
 
 @app.route("/api/terminals")
@@ -84,9 +109,6 @@ def get_schedule():
     upcoming.sort(key=lambda e: e["seconds_until"])
     return jsonify(upcoming)
 
-@app.route("/")
-def dashboard():
-    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 
 @app.route("/api/history")
 def get_history():
