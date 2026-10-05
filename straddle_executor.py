@@ -3,11 +3,17 @@ straddle_executor.py - runs the full straddle sequence for ONE MT5 terminal
 against ONE scheduled macro event. Spawned as a subprocess by main.py, once
 per detected terminal, so every open terminal trades in parallel.
 
-SAFETY: if connect()/setup takes long enough to eat the entire pre-release
-lead-time buffer, this ABORTS placing the straddle for this terminal rather
-than placing orders into an already-moved market (this happened during the
-Sep 16 FOMC run - see FOMC_logs.md - and produced pure negative-slippage
-losing trades with no real straddle exposure at all).
+UPDATED (post Oct 2 NFP run): the no-fill cleanup at POST_RELEASE_NO_FILL_TIMEOUT_SECONDS
+no longer exits the script immediately. A delete attempt can fail with retcode
+10029 (TRADE_RETCODE_FROZEN) if price is crossing that exact order's trigger
+level at that instant - this does NOT mean it filled, just that it's
+temporarily locked. Previously, if that delete failed, the script shut down
+anyway and abandoned that order with zero further management (no breakeven,
+no hard exit) - if it filled minutes later from unrelated price movement, it
+sat completely unsupervised. Now: delete_pending_orders retries a couple of
+times, and the no-fill branch no longer breaks the loop - monitoring
+continues all the way to the hard exit mark regardless, so any straggler
+that does eventually fill still gets full lifecycle management.
 
 Standalone usage:
     python straddle_executor.py --terminal-path "C:\path\to\terminal64.exe" --event-name "CPI" --release-time-utc "2026-09-11T12:30:00+00:00"
@@ -163,14 +169,36 @@ def get_still_pending(symbol, tickets):
     return [t for t in tickets if t in current_ids]
 
 
-def delete_pending_orders(tickets, label, event_name):
+def delete_pending_orders(tickets, label, event_name, max_retries=3, retry_delay=0.3):
+    """Deletes each ticket, retrying on TRADE_RETCODE_FROZEN (10029) - this
+    retcode means price was crossing that order's trigger level at that exact
+    instant, not that it already filled. A short retry clears most of these.
+    Returns the list of tickets that STILL couldn't be deleted after retries -
+    the caller must keep monitoring those, not assume they're gone."""
+    FROZEN = 10029
+    still_stuck = []
+
     for ticket in tickets:
-        result = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": ticket})
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
-            log(event_name, f"DELETED {label} order {ticket} (unfilled)")
-        else:
+        deleted = False
+        for attempt in range(max_retries):
+            result = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": ticket})
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                log(event_name, f"DELETED {label} order {ticket} (unfilled)"
+                                 + (f" [succeeded on retry {attempt+1}]" if attempt > 0 else ""))
+                deleted = True
+                break
+            elif result.retcode == FROZEN and attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
+            else:
+                break
+
+        if not deleted:
             log(event_name, f"DELETE FAILED for {label} order {ticket}: retcode={result.retcode} "
-                             f"(likely already filled/gone - not necessarily an error)")
+                             f"({'order is FROZEN - price is crossing its level right now, it may still fill' if result.retcode == FROZEN else 'order likely no longer exists in a deletable state'})")
+            still_stuck.append(ticket)
+
+    return still_stuck
 
 
 def get_our_positions(symbol):
@@ -285,9 +313,6 @@ def close_all_positions(symbol, symbol_info, event_name, release_time_utc):
 
 
 def reconciliation_sweep(symbol, event_name, release_time_utc):
-    """Authoritative final pass over MT5's own deal history for this event -
-    independent of live polling, so anything that opened and closed entirely
-    between two poll cycles (invisible to live logs) still shows up here."""
     try:
         date_from = release_time_utc - timedelta(seconds=30)
         date_to = datetime.now(timezone.utc) + timedelta(seconds=5)
@@ -331,8 +356,7 @@ def run(terminal_path, event_name, release_time_utc):
         overrun = (now_after_setup - place_at_dt).total_seconds()
         log(event_name, f"CRITICAL: setup took too long - intended placement time already passed "
                          f"by {overrun:.2f}s before we could even wait for it. ABORTING straddle for "
-                         f"this terminal (placing now would just chase an already-moved market, not "
-                         f"straddle it - see the Sep 16 FOMC run for what this looks like when it isn't caught).")
+                         f"this terminal (placing now would just chase an already-moved market).")
         append_execution_log(event_name, release_time_utc, "none", None, None, "aborted_late_setup")
         mt5.shutdown()
         return
@@ -352,6 +376,7 @@ def run(terminal_path, event_name, release_time_utc):
     breakeven_done = set()
     known_positions = {}
     hard_exit_done = False
+    no_fill_cleanup_done = False
 
     log(event_name, "MONITORING for fills...")
     while True:
@@ -369,14 +394,26 @@ def run(terminal_path, event_name, release_time_utc):
         if get_our_positions(symbol):
             manage_breakeven(symbol, symbol_info, breakeven_done, event_name)
 
+        # NO-FILL CLEANUP: best-effort early cleanup if nothing has filled yet by
+        # the timeout. This does NOT end monitoring anymore - a delete can fail
+        # with FROZEN (price crossing that exact level right then), and if so
+        # that order may still fill moments later. We keep watching it instead
+        # of abandoning it.
         no_positions_yet = not buy_logged and not sell_logged
-        if no_positions_yet and seconds_since_release > config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS:
-            log(event_name, f"NO FILL after {config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS}s post-release. Deleting all.")
-            delete_pending_orders(get_still_pending(symbol, buy_tickets), "buy", event_name)
-            delete_pending_orders(get_still_pending(symbol, sell_tickets), "sell", event_name)
-            append_execution_log(event_name, release_time_utc, "none", None, None, "no_fill")
-            break
+        if not no_fill_cleanup_done and no_positions_yet and seconds_since_release > config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS:
+            log(event_name, f"NO FILL after {config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS}s post-release. "
+                             f"Attempting cleanup (monitoring continues regardless of outcome).")
+            stuck_buy = delete_pending_orders(get_still_pending(symbol, buy_tickets), "buy", event_name)
+            stuck_sell = delete_pending_orders(get_still_pending(symbol, sell_tickets), "sell", event_name)
+            if stuck_buy or stuck_sell:
+                log(event_name, f"{len(stuck_buy)+len(stuck_sell)} order(s) could not be deleted "
+                                 f"(frozen/in-flight) - continuing to monitor them until hard exit.")
+            else:
+                append_execution_log(event_name, release_time_utc, "none", None, None, "no_fill")
+            no_fill_cleanup_done = True
+            # deliberately no break here - loop continues to hard exit
 
+        # HARD EXIT: fixed 60s mark - close everything open, delete everything still pending, no exceptions
         if not hard_exit_done and seconds_since_release >= config.EXIT_SECONDS_AFTER_RELEASE:
             log(event_name, f"HARD EXIT TRIGGERED at t+{seconds_since_release:.2f}s since release.")
             close_all_positions(symbol, symbol_info, event_name, release_time_utc)
