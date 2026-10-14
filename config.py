@@ -11,7 +11,7 @@ EASTERN = ZoneInfo("America/New_York")
 # ============================================================
 SYMBOL = "XAUUSD"
 LOT_SIZE = 0.01
-NUM_ORDERS_PER_SIDE = 7
+NUM_ORDERS_PER_SIDE = 1
 EXIT_SECONDS_AFTER_RELEASE = 60   # close ALL positions exactly this many seconds after release, no exceptions
 STOP_DISTANCE_POINTS = 300
 INITIAL_SL_POINTS = 100
