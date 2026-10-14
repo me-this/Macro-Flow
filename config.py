@@ -11,7 +11,7 @@ EASTERN = ZoneInfo("America/New_York")
 # ============================================================
 SYMBOL = "XAUUSD"
 LOT_SIZE = 0.01
-NUM_ORDERS_PER_SIDE = 2
+NUM_ORDERS_PER_SIDE = 7
 EXIT_SECONDS_AFTER_RELEASE = 60   # close ALL positions exactly this many seconds after release, no exceptions
 STOP_DISTANCE_POINTS = 300
 INITIAL_SL_POINTS = 100
@@ -23,7 +23,7 @@ COUNTDOWN_LOG_START_SECONDS = 30 * 60   # start logging countdown 30 min before 
 COUNTDOWN_LOG_INTERVAL_SECONDS = 60     # log remaining time this often during the countdown
 SCHEDULER_IDLE_POLL_SECONDS = 60        # how often to recheck when no event is upcoming
 PRE_RELEASE_LEAD_SECONDS = 3               # place orders this many seconds BEFORE release
-POST_RELEASE_NO_FILL_TIMEOUT_SECONDS = 6  # delete unfilled orders this many seconds AFTER release
+POST_RELEASE_NO_FILL_TIMEOUT_SECONDS = 10  # delete unfilled orders this many seconds AFTER release
 POLL_INTERVAL_SECONDS = 0.1
 QUIET_WINDOW_BEFORE_SECONDS = 30   # dashboard stops polling MT5 this long before a scheduled release
 QUIET_WINDOW_AFTER_SECONDS = 90    # ...and resumes this long after
