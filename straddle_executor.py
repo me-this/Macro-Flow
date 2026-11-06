@@ -3,17 +3,12 @@ straddle_executor.py - runs the full straddle sequence for ONE MT5 terminal
 against ONE scheduled macro event. Spawned as a subprocess by main.py, once
 per detected terminal, so every open terminal trades in parallel.
 
-UPDATED (post Oct 2 NFP run): the no-fill cleanup at POST_RELEASE_NO_FILL_TIMEOUT_SECONDS
-no longer exits the script immediately. A delete attempt can fail with retcode
-10029 (TRADE_RETCODE_FROZEN) if price is crossing that exact order's trigger
-level at that instant - this does NOT mean it filled, just that it's
-temporarily locked. Previously, if that delete failed, the script shut down
-anyway and abandoned that order with zero further management (no breakeven,
-no hard exit) - if it filled minutes later from unrelated price movement, it
-sat completely unsupervised. Now: delete_pending_orders retries a couple of
-times, and the no-fill branch no longer breaks the loop - monitoring
-continues all the way to the hard exit mark regardless, so any straggler
-that does eventually fill still gets full lifecycle management.
+Take profit: if config.TAKE_PROFIT_POINTS > 0, every stop order is placed
+with a TP that distance beyond the stop price. 0 disables it.
+
+The no-fill cleanup does not end monitoring: a delete can fail with FROZEN
+(10029) if price is crossing that order's level at that instant, so the loop
+keeps running to the hard exit and any straggler that fills is still managed.
 
 Standalone usage:
     python straddle_executor.py --terminal-path "C:\path\to\terminal64.exe" --event-name "CPI" --release-time-utc "2026-09-11T12:30:00+00:00"
@@ -62,7 +57,8 @@ def connect(terminal_path, event_name):
 
     acct = mt5.account_info()
     log(event_name, f"CONNECTED. Account={acct.login if acct else 'unknown'} "
-                     f"Broker={acct.company if acct else 'unknown'} Symbol={symbol} Point={info.point}")
+                     f"Broker={acct.company if acct else 'unknown'} Symbol={symbol} "
+                     f"Point={info.point} Digits={info.digits}")
     return info, symbol
 
 
@@ -116,46 +112,54 @@ def append_execution_log(event_name, release_time_utc, side, entry_price, exit_p
 
 def place_straddle(symbol, symbol_info, event_name):
     point = symbol_info.point
+    digits = symbol_info.digits
     tick = mt5.symbol_info_tick(symbol)
     mid_price = (tick.ask + tick.bid) / 2
     filling = get_filling_mode(symbol_info)
 
-    buy_stop_price = round(mid_price + config.STOP_DISTANCE_POINTS * point, symbol_info.digits)
-    sell_stop_price = round(mid_price - config.STOP_DISTANCE_POINTS * point, symbol_info.digits)
-    buy_sl = round(buy_stop_price - config.INITIAL_SL_POINTS * point, symbol_info.digits)
-    sell_sl = round(sell_stop_price + config.INITIAL_SL_POINTS * point, symbol_info.digits)
+    buy_stop_price = round(mid_price + config.STOP_DISTANCE_POINTS * point, digits)
+    sell_stop_price = round(mid_price - config.STOP_DISTANCE_POINTS * point, digits)
+    buy_sl = round(buy_stop_price - config.INITIAL_SL_POINTS * point, digits)
+    sell_sl = round(sell_stop_price + config.INITIAL_SL_POINTS * point, digits)
+
+    tp_points = getattr(config, "TAKE_PROFIT_POINTS", 0)
+    if tp_points > 0:
+        buy_tp = round(buy_stop_price + tp_points * point, digits)
+        sell_tp = round(sell_stop_price - tp_points * point, digits)
+    else:
+        buy_tp = sell_tp = 0.0
 
     log(event_name, f"PLACING STRADDLE. Mid={mid_price} BuyStop(intended)={buy_stop_price} "
                      f"SellStop(intended)={sell_stop_price} SL_dist={config.INITIAL_SL_POINTS}pts "
-                     f"OrdersPerSide={config.NUM_ORDERS_PER_SIDE}")
+                     f"TP_dist={tp_points}pts OrdersPerSide={config.NUM_ORDERS_PER_SIDE}")
 
     buy_tickets, sell_tickets = [], []
 
     for i in range(config.NUM_ORDERS_PER_SIDE):
         req = {
             "action": mt5.TRADE_ACTION_PENDING, "symbol": symbol, "volume": config.LOT_SIZE,
-            "type": mt5.ORDER_TYPE_BUY_STOP, "price": buy_stop_price, "sl": buy_sl,
+            "type": mt5.ORDER_TYPE_BUY_STOP, "price": buy_stop_price, "sl": buy_sl, "tp": buy_tp,
             "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling,
             "magic": config.MAGIC_NUMBER, "comment": f"straddle_buy_{event_name[:10]}",
         }
         result = mt5.order_send(req)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             buy_tickets.append(result.order)
-            log(event_name, f"BUY STOP #{i+1} PLACED ticket={result.order} price={buy_stop_price}")
+            log(event_name, f"BUY STOP #{i+1} PLACED ticket={result.order} price={buy_stop_price} sl={buy_sl} tp={buy_tp}")
         else:
             log(event_name, f"BUY STOP #{i+1} FAILED retcode={result.retcode} comment={result.comment}")
 
     for i in range(config.NUM_ORDERS_PER_SIDE):
         req = {
             "action": mt5.TRADE_ACTION_PENDING, "symbol": symbol, "volume": config.LOT_SIZE,
-            "type": mt5.ORDER_TYPE_SELL_STOP, "price": sell_stop_price, "sl": sell_sl,
+            "type": mt5.ORDER_TYPE_SELL_STOP, "price": sell_stop_price, "sl": sell_sl, "tp": sell_tp,
             "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling,
             "magic": config.MAGIC_NUMBER, "comment": f"straddle_sell_{event_name[:10]}",
         }
         result = mt5.order_send(req)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             sell_tickets.append(result.order)
-            log(event_name, f"SELL STOP #{i+1} PLACED ticket={result.order} price={sell_stop_price}")
+            log(event_name, f"SELL STOP #{i+1} PLACED ticket={result.order} price={sell_stop_price} sl={sell_sl} tp={sell_tp}")
         else:
             log(event_name, f"SELL STOP #{i+1} FAILED retcode={result.retcode} comment={result.comment}")
 
@@ -170,11 +174,9 @@ def get_still_pending(symbol, tickets):
 
 
 def delete_pending_orders(tickets, label, event_name, max_retries=3, retry_delay=0.3):
-    """Deletes each ticket, retrying on TRADE_RETCODE_FROZEN (10029) - this
-    retcode means price was crossing that order's trigger level at that exact
-    instant, not that it already filled. A short retry clears most of these.
-    Returns the list of tickets that STILL couldn't be deleted after retries -
-    the caller must keep monitoring those, not assume they're gone."""
+    """Deletes each ticket, retrying on TRADE_RETCODE_FROZEN (10029) - price was
+    crossing that order's level at that instant, not necessarily filled.
+    Returns the tickets that STILL couldn't be deleted after retries."""
     FROZEN = 10029
     still_stuck = []
 
@@ -225,6 +227,8 @@ def log_new_fills(symbol, side_label, intended_price, point, event_name, release
 
 
 def detect_external_closes(symbol, symbol_info, known_positions, event_name):
+    """Positions that vanished without us closing them: SL (initial or
+    breakeven-moved) or TP. Labelled from MT5's own deal reason."""
     point = symbol_info.point
     current_positions = get_our_positions(symbol)
     current_tickets = {p.ticket for p in current_positions}
@@ -238,9 +242,18 @@ def detect_external_closes(symbol, symbol_info, known_positions, event_name):
             exit_price = close_deal.price
             pnl_points = (exit_price - info["entry"]) if info["side"] == "buy" else (info["entry"] - exit_price)
             pnl_points /= point
-            log(event_name, f"POSITION CLOSED EXTERNALLY (likely SL hit) ticket={ticket} "
-                             f"side={info['side']} entry={info['entry']} exit={exit_price} result={pnl_points:+.1f}pts")
-            append_execution_log(event_name, info["release_time_utc"], info["side"], info["entry"], exit_price, "sl_hit")
+
+            reason = getattr(close_deal, "reason", None)
+            if reason == getattr(mt5, "DEAL_REASON_TP", -1):
+                label, outcome = "TP HIT", "tp_hit"
+            elif reason == getattr(mt5, "DEAL_REASON_SL", -2):
+                label, outcome = "SL HIT (initial or breakeven-moved)", "sl_hit"
+            else:
+                label, outcome = f"CLOSED EXTERNALLY (deal reason={reason})", "closed_external"
+
+            log(event_name, f"{label} ticket={ticket} side={info['side']} entry={info['entry']} "
+                             f"exit={exit_price} result={pnl_points:+.1f}pts")
+            append_execution_log(event_name, info["release_time_utc"], info["side"], info["entry"], exit_price, outcome)
         else:
             log(event_name, f"POSITION CLOSED EXTERNALLY ticket={ticket} (could not fetch close deal from history)")
         del known_positions[ticket]
@@ -298,7 +311,7 @@ def close_all_positions(symbol, symbol_info, event_name, release_time_utc):
         req = {
             "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": pos.volume,
             "type": close_type, "position": pos.ticket, "price": close_price,
-            "type_filling": filling, "magic": config.MAGIC_NUMBER, "comment": "hard_exit_60s",
+            "type_filling": filling, "magic": config.MAGIC_NUMBER, "comment": "hard_exit",
         }
         result = mt5.order_send(req)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
@@ -306,7 +319,7 @@ def close_all_positions(symbol, symbol_info, event_name, release_time_utc):
             pnl_points /= symbol_info.point
             log(event_name, f"HARD EXIT CLOSED position={pos.ticket} side={side} entry={pos.price_open} "
                              f"exit={close_price} result={pnl_points:+.1f}pts")
-            append_execution_log(event_name, release_time_utc, side, pos.price_open, close_price, "closed_60s")
+            append_execution_log(event_name, release_time_utc, side, pos.price_open, close_price, "closed_hard_exit")
         else:
             log(event_name, f"HARD EXIT CLOSE FAILED position={pos.ticket} retcode={result.retcode} {result.comment}")
             append_execution_log(event_name, release_time_utc, side, pos.price_open, None, f"close_failed_{result.retcode}")
@@ -343,8 +356,7 @@ def run(terminal_path, event_name, release_time_utc):
     log(event_name, f"SUBPROCESS STARTED at {subprocess_start.isoformat()}")
 
     symbol_info, symbol = connect(terminal_path, event_name)
-    setup_done = datetime.now(timezone.utc)
-    setup_duration = (setup_done - subprocess_start).total_seconds()
+    setup_duration = (datetime.now(timezone.utc) - subprocess_start).total_seconds()
     log(event_name, f"SETUP (connect+resolve symbol) took {setup_duration:.2f}s")
 
     check_broker_time_offset(symbol, event_name)
@@ -354,10 +366,9 @@ def run(terminal_path, event_name, release_time_utc):
 
     if now_after_setup >= place_at_dt:
         overrun = (now_after_setup - place_at_dt).total_seconds()
-        log(event_name, f"CRITICAL: setup took too long - intended placement time already passed "
-                         f"by {overrun:.2f}s before we could even wait for it. ABORTING straddle for "
-                         f"this terminal (placing now would just chase an already-moved market).")
-        append_execution_log(event_name, release_time_utc, "none", None, None, "aborted_late_setup")
+        log(event_name, f"CRITICAL: intended placement time already passed by {overrun:.2f}s "
+                         f"(setup took {setup_duration:.2f}s). ABORTING straddle for this terminal.")
+        append_execution_log(event_name, release_time_utc, "none", None, None, "aborted_late_start")
         mt5.shutdown()
         return
 
@@ -394,11 +405,6 @@ def run(terminal_path, event_name, release_time_utc):
         if get_our_positions(symbol):
             manage_breakeven(symbol, symbol_info, breakeven_done, event_name)
 
-        # NO-FILL CLEANUP: best-effort early cleanup if nothing has filled yet by
-        # the timeout. This does NOT end monitoring anymore - a delete can fail
-        # with FROZEN (price crossing that exact level right then), and if so
-        # that order may still fill moments later. We keep watching it instead
-        # of abandoning it.
         no_positions_yet = not buy_logged and not sell_logged
         if not no_fill_cleanup_done and no_positions_yet and seconds_since_release > config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS:
             log(event_name, f"NO FILL after {config.POST_RELEASE_NO_FILL_TIMEOUT_SECONDS}s post-release. "
@@ -411,9 +417,7 @@ def run(terminal_path, event_name, release_time_utc):
             else:
                 append_execution_log(event_name, release_time_utc, "none", None, None, "no_fill")
             no_fill_cleanup_done = True
-            # deliberately no break here - loop continues to hard exit
 
-        # HARD EXIT: fixed 60s mark - close everything open, delete everything still pending, no exceptions
         if not hard_exit_done and seconds_since_release >= config.EXIT_SECONDS_AFTER_RELEASE:
             log(event_name, f"HARD EXIT TRIGGERED at t+{seconds_since_release:.2f}s since release.")
             close_all_positions(symbol, symbol_info, event_name, release_time_utc)
