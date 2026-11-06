@@ -9,7 +9,8 @@ EASTERN = ZoneInfo("America/New_York")
 # ============================================================
 # TRADING PARAMETERS
 # ============================================================
-SYMBOL = "XAUUSD"
+SYMBOL = "EURUSD"
+TAKE_PROFIT_POINTS = 0   # 0 = no TP. In points (10 points = 1 pip on EURUSD). Keep above BREAKEVEN_TRIGGER_POINTS
 LOT_SIZE = 0.5
 NUM_ORDERS_PER_SIDE = 6
 EXIT_SECONDS_AFTER_RELEASE = 60   # close ALL positions exactly this many seconds after release, no exceptions
