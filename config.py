@@ -11,7 +11,7 @@ EASTERN = ZoneInfo("America/New_York")
 # ============================================================
 SYMBOL = "EURUSD"
 TAKE_PROFIT_POINTS = 200  # 0 = no TP. In points (10 points = 1 pip on EURUSD). Keep above BREAKEVEN_TRIGGER_POINTS
-LOT_SIZE = 0.001
+LOT_SIZE = 0.01
 NUM_ORDERS_PER_SIDE = 15
 EXIT_SECONDS_AFTER_RELEASE = 60   # close ALL positions exactly this many seconds after release, no exceptions
 STOP_DISTANCE_POINTS = 65
